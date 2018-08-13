@@ -1,0 +1,42 @@
+---
+title: DRAKVUF: Support for Dynamic Malware Analysis on ARM
+subtitle:
+layout: default
+modal-id: 9
+category: gsoc2018
+date: 2018-8-13
+img: temp.svg
+thumbnail: temp.svg
+alt: license-img
+repository: https://github.com/HolmesProcessing/gsoc_
+documentation: 
+license: 
+
+---
+## Overview
+
+In this blog entry I am going to describe the work I did for the 2018 Google Summer of Code (GSoC). I describe the techniques I used to successfully finish the project and what I learned during the three months.
+
+### About Me
+
+I am Ulrich Fourier, a Computer Science student currently pursuing my masters degree at the Technical University of Munich. During writing my bachelor thesis I used Virtual Machine Introspection (VMI) techniques. Because I already had experience with VMI and dynamic malware analysis, I was very interested in this project. 
+
+## The GSoC Project
+Dynamic malware analysis has one enemy, split-personality malware. This malware changes its behavior if it thinks it is analysed. In order to circumvent the detection of such analysis system, Virtual Machine Introspection (VMI) was introduced. With VMI we can have a look inside the guest, while being stealthy at the same time. 
+
+VMI has been around quite a long time for x86 architectures and because of the rising use of arm processors, also in the server market, it is only logical to port this technique to arm. This Project is build upon the former GSoC [project](https://summerofcode.withgoogle.com/archive/2016/projects/6408159388237824/) done by my mentor Sergej Proskurin. This project lays -as the title says - the foundation for dynamic malware analysis on arm. This projects implements a technique called altp2m for arm. altp2m allows us to provide multiple memory views for the guest. For understanding altp2m we first take a look at how the memory address translation of virtual machines work.
+
+On the one side the operating system in the virtual machines wants to take care of memory translation itself, on the other side the hypervisor wants the virtual machines memory regions to be strictly separated. To solve this problem in software shadow page tables were introduced and Intel provided a technique build into the hardware called the second layer address translation (SLAT). The hypervisor translate the guest physical address to a host physical address, or as it is called in Xen, machine address (p2m). altp2m now takes advantage of the fact that we can manipulate this translation, and provide different results for the translation. These alternate views can be changed depending on what the guest wants to do with the memory. For example we can give the guest the address to a page with an injected instruction when it tries to executes the memory and provide it with a clean page when it does a integrity check. We can combine multiple pages to a view.
+
+### Trapping the guest
+For VMI it is necessary to be able to stop and examine the guest when it executes a certain part of the code. As described earlier we are able to stealthy inject code into the guest, on x86 for example drakvuf injects the INT3 instruction into the guest. Anytime the instruction is executed the hypervisor is called, thus allowing us to stop the guest and do some analysis. Because INT3 is x86 specific we needed to find an equivalent instruction for ARM. We chose the system management call (SMC) instruction. When this instruction is executed the guest is interrupted and the hypervisor is informed, this is equivalent to x86. The only disadvantage SMC has that it is not allowed to be used in user space. We therefore can only trap code running in kernel space. 
+
+### Single Stepping
+In order to inject the SMC instruction into the guest we create three different altp2m views, the clean, the original, the execute and the step view. Similiar to x86, when the guest executes code we are using the execute view and change to the original, unchanged view, as soon as the guest tries to read the memory. When a previously into the execute view injected SMC instruction is hit, the hypervisor informs our analysis program, we then can analyse the virtual machine. To continue the guest afterwards, we also need to execute the instruction we overwrote by injecting the SMC instruction. In x86 this is solved by switching to the original view and turn on single stepping for one instruction, afterwards the memory view is switched back to the execute view and the guest is resumed normally. Unfortunately, xen does not support single stepping on arm. To solve this problem the third view, the step view, is used. When we inject the SMC instruction into the guest, we not only inject a SMC into the execute view at a specific address, but also we inject another SMC into the third view. Because arm64 has a fixed instruction length we know the length of the replaced instruction in the execute view and can add the second, the so called double SMC behind the first SMC on the step view. This way we switch to the step view as soon as our analysis program is done to execute the instruction replaced by the first SMC. After this instruction is executed the double SMC will lead to another hypervisor intervention where we then switch back to the execute view and resume execution.
+
+### Changes I made
+In order to implement this technique we needed to extend the code of drakvuf and [libvmi](https://github.com/libvmi/libvmi/commit/69b31982bcc136ddcdff07c4cf803f6343a20468). TODO:links. At first, we added arm support to libvmi this was necessary in order to provide privcall events and arm register to drakvuf. 
+
+## What I learned
+The most important take away for me from participating in GSoC is how to use git in a collaborative environment. Although I have used git before, I did not know what a powerful tool it is. 
+The other take away is that people maintaing open source projects are really nice, helpful and thankful for every addition to their code. With this in mind I think I am more likely to participate in open source software development in the future.
